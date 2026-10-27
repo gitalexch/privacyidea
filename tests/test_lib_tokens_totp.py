@@ -16,6 +16,7 @@ from privacyidea.lib.policy import (PolicyClass, set_policy, delete_policy, SCOP
 from privacyidea.lib.realm import (set_realm)
 from privacyidea.lib.resolver import (save_resolver)
 from privacyidea.lib.token import init_token, remove_token, import_tokens, get_tokens
+from privacyidea.lib.tokens.HMAC import HmacOtp
 from privacyidea.lib.tokens.totptoken import TotpTokenClass
 from privacyidea.lib.user import (User)
 from privacyidea.models import Token, Config, Challenge
@@ -613,7 +614,7 @@ class TOTPTokenTestCase(MyTestCase):
                             options={"initTime": 47251645 * 30})
         self.assertTrue(r == -1, r)
 
-        # Autosync with a gap in the next otp value will fail
+        # Autosync permits skipped codes within the default timeout.
         token.token.count = 47251640
         # Just try some bullshit config value
         set_privacyidea_config("AutoResyncTimeout", "totally not a number")
@@ -621,12 +622,10 @@ class TOTPTokenTestCase(MyTestCase):
         r = token.check_otp("032819", window=30,
                             options={"initTime": 47251645 * 30})
         self.assertTrue(r == -1, r)
-        # counter = 47251650 => otp = 589836, will NOT _autosync
+        # counter = 47251650 => otp = 589836, will be autosynced.
         r = token.check_otp("589836", window=30,
                             options={"initTime": 47251645 * 30})
-        self.assertTrue(r == -1, r)
-
-        # TOTP has no dueDate / AutoResyncTimeout
+        self.assertTrue(r == 47251650, r)
 
         # No _autosync
         set_privacyidea_config("AutoResync", False)
@@ -890,3 +889,183 @@ class TOTPTokenTestCase(MyTestCase):
 
         # Clean up
         remove_token(totptoken.token.serial)
+
+
+class TOTPAutoresyncTestCase(MyTestCase):
+    first_counter = 47251640
+    server_time = 47251600 * 30
+
+    def setUp(self):
+        super().setUp()
+        set_privacyidea_config("AutoResync", True)
+        set_privacyidea_config("AutoResyncTimeout", 90)
+        self.create_token()
+
+    def create_token(self, step=30):
+        self.token = init_token({"type": "totp", "otpkey": TOTPTokenTestCase.otpkey,
+                                 "otplen": 6, "timeStep": step, "timeWindow": step,
+                                 "timeShift": 0})
+        self.token.set_sync_window(100)
+        self.token.set_otp_count(self.first_counter - 10)
+        self.otp = HmacOtp(self.token.token.get_otpkey(), digits=6)
+
+    def check_counter(self, counter, elapsed=0):
+        otp = self.otp.generate(counter=counter, inc_counter=False)
+        with mock.patch("privacyidea.lib.tokens.totptoken.time.time",
+                        return_value=self.server_time + elapsed):
+            return self.token.check_otp(otp)
+
+    def start_pair(self):
+        self.assertEqual(self.check_counter(self.first_counter), -1)
+        self.assertEqual(int(self.token.get_tokeninfo("otp1c")), self.first_counter)
+        self.assertEqual(int(self.token.get_tokeninfo("dueDate")),
+                         self.server_time + self.token.get_sync_timeout())
+        self.assertEqual(self.token.timeshift, 0)
+
+    def assert_pair_cleared(self):
+        info = self.token.get_tokeninfo()
+        self.assertNotIn("otp1c", info)
+        self.assertNotIn("dueDate", info)
+
+    def test_accepts_successor_and_skipped_codes(self):
+        for gap in (1, 2, 3):
+            with self.subTest(gap=gap):
+                self.create_token()
+                self.start_pair()
+                second = self.first_counter + gap
+                elapsed = gap * 30 - 1
+                self.assertEqual(self.check_counter(second, elapsed), second)
+                self.assertEqual(self.token.get_otp_count(), second)
+                self.assertEqual(self.token.timeshift, second * 30 - self.server_time - elapsed)
+                self.assert_pair_cleared()
+
+    def test_rejects_expired_pair(self):
+        for elapsed in (90, 91):
+            with self.subTest(elapsed=elapsed):
+                self.create_token()
+                self.start_pair()
+                self.assertEqual(self.check_counter(self.first_counter + 1, elapsed), -1)
+                self.assertEqual(self.token.get_otp_count(), self.first_counter - 10)
+                self.assertEqual(self.token.timeshift, 0)
+                self.assert_pair_cleared()
+
+    def test_rejects_gap_beyond_timeout(self):
+        self.start_pair()
+        self.assertEqual(self.check_counter(self.first_counter + 4, elapsed=30), -1)
+        self.assert_pair_cleared()
+
+    def test_can_restart_after_expiration(self):
+        self.start_pair()
+        self.assertEqual(self.check_counter(self.first_counter + 3, elapsed=90), -1)
+        self.assert_pair_cleared()
+        self.assertEqual(self.check_counter(self.first_counter + 4, elapsed=120), -1)
+        self.assertEqual(int(self.token.get_tokeninfo("dueDate")), self.server_time + 210)
+        self.assertEqual(self.check_counter(self.first_counter + 6, elapsed=180), self.first_counter + 6)
+        self.assert_pair_cleared()
+
+    def test_rejects_duplicate_and_decreasing_counters(self):
+        for gap in (0, -1):
+            with self.subTest(gap=gap):
+                self.create_token()
+                self.start_pair()
+                self.assertEqual(self.check_counter(self.first_counter + gap, elapsed=30), -1)
+                self.assert_pair_cleared()
+
+    def test_rejects_used_first_counter(self):
+        self.token.set_otp_count(self.first_counter)
+        self.assertEqual(self.check_counter(self.first_counter), -1)
+        self.assert_pair_cleared()
+        self.assertEqual(self.check_counter(self.first_counter + 2, elapsed=60), -1)
+        self.assertEqual(int(self.token.get_tokeninfo("otp1c")), self.first_counter + 2)
+
+    def test_rejects_pair_used_by_another_authentication(self):
+        self.start_pair()
+        self.token.set_otp_count(self.first_counter + 1)
+        self.assertEqual(self.check_counter(self.first_counter + 2, elapsed=60), -1)
+        self.assert_pair_cleared()
+
+    def test_rejects_second_counter_outside_sync_window(self):
+        self.start_pair()
+        self.token.set_sync_window(10)
+        self.assertEqual(self.check_counter(self.first_counter + 2, elapsed=60), -1)
+        self.assertEqual(self.token.get_otp_count(), self.first_counter - 10)
+
+    def test_rejects_first_counter_outside_sync_window(self):
+        self.token.set_sync_window(10)
+        self.assertEqual(self.check_counter(self.first_counter), -1)
+        self.assert_pair_cleared()
+
+    def test_rejects_legacy_pair_without_deadline(self):
+        self.token.write_tokeninfo("otp1c", self.first_counter)
+        self.assertEqual(self.check_counter(self.first_counter + 1, elapsed=30), -1)
+        self.assert_pair_cleared()
+        self.assertEqual(self.check_counter(self.first_counter + 2, elapsed=60), -1)
+        self.assertEqual(self.check_counter(self.first_counter + 3, elapsed=89), self.first_counter + 3)
+        self.assert_pair_cleared()
+
+    def test_invalid_timeout_uses_existing_fallback(self):
+        set_privacyidea_config("AutoResyncTimeout", "not a number")
+        self.start_pair()
+        self.assertEqual(int(self.token.get_tokeninfo("dueDate")), self.server_time + 300)
+        second = self.first_counter + 10
+        self.assertEqual(self.check_counter(second, elapsed=299), second)
+        self.assert_pair_cleared()
+
+    def test_timeout_rounds_down_to_whole_steps(self):
+        set_privacyidea_config("AutoResyncTimeout", 59)
+        self.start_pair()
+        self.assertEqual(self.check_counter(self.first_counter + 2, elapsed=31), -1)
+        self.assert_pair_cleared()
+
+    def test_timeout_shorter_than_step_cannot_complete_pair(self):
+        for timeout in (29, 0, -1):
+            with self.subTest(timeout=timeout):
+                self.create_token()
+                set_privacyidea_config("AutoResyncTimeout", timeout)
+                self.start_pair()
+                self.assertEqual(self.check_counter(self.first_counter + 1, elapsed=1), -1)
+                self.assert_pair_cleared()
+
+    def test_sixty_second_step(self):
+        self.create_token(step=60)
+        self.server_time = 47251600 * 60
+        set_privacyidea_config("AutoResyncTimeout", 180)
+        self.start_pair()
+        second = self.first_counter + 3
+        self.assertEqual(self.check_counter(second, elapsed=179), second)
+        self.assert_pair_cleared()
+
+    def test_disabled_autoresync_does_not_store_pair(self):
+        set_privacyidea_config("AutoResync", False)
+        self.assertEqual(self.check_counter(self.first_counter), -1)
+        self.assertEqual(self.check_counter(self.first_counter + 1, elapsed=30), -1)
+        self.assert_pair_cleared()
+
+    def test_normal_validation_does_not_start_autoresync(self):
+        counter = self.server_time // 30
+        self.token.set_otp_count(counter - 1)
+        self.assertEqual(self.check_counter(counter), counter)
+        self.assert_pair_cleared()
+
+    def test_validation_api_accepts_gap_and_rejects_replay(self):
+        set_prepend_pin(True)
+        self.token.set_pin("testpin")
+        self.token.save()
+        for counter, elapsed, expected, failcount in (
+                (self.first_counter, 0, False, 1),
+                (self.first_counter + 2, 60, True, 0),
+                (self.first_counter + 2, 61, False, 1)):
+            with self.subTest(counter=counter, elapsed=elapsed):
+                self.reset_flask_g()
+                otp = self.otp.generate(counter=counter, inc_counter=False)
+                with mock.patch("privacyidea.lib.tokens.totptoken.time.time",
+                                return_value=self.server_time + elapsed):
+                    with self.app.test_request_context(
+                            "/validate/check", method="POST",
+                            data={"serial": self.token.token.serial, "pass": "testpin" + otp}):
+                        response = self.app.full_dispatch_request()
+                        self.assertEqual(response.status_code, 200)
+                        self.assertEqual(response.json["result"]["value"], expected)
+                self.assertEqual(self.token.get_failcount(), failcount)
+        self.assertEqual(self.token.get_otp_count(), self.first_counter + 2)
+        self.assert_pair_cleared()

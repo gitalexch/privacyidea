@@ -98,20 +98,32 @@ provides a wrong OTP value. AutoResync works like this:
   remembers the counter of the OTP value for this token in the token info
   field ``otp1c``.
 
-* Now the user needs to authenticate a second time within the time-interval
-  given in **Auto resync timeout** with the next successive OTP value.
+* Now the user needs to authenticate a second time before the deadline given
+  by **Auto resync timeout**, in seconds (default: 300).
 
-* The system checks if the counter of the second OTP value is the successive
-  value to ``otp1c``.
+* For HOTP, the second OTP counter must be the next successive value to
+  ``otp1c``. For TOTP, it must be greater than ``otp1c`` and advance it by no
+  more than **Auto resync timeout** seconds of token time. Both TOTP counters
+  must be newer than the last accepted OTP counter, and both OTP values must
+  be found within the token's sync window when submitted.
 
 * If it is, the token counter is set and the user is successfully authenticated.
 
 .. note:: AutoResync works for all HOTP and TOTP based tokens including SMS and
-   Email tokens. For TOTP tokens the **Auto resync timeout** is not used: the
-   second OTP value must belong to the time step directly after the remembered
-   one and lie within the sync window around the current time, which limits the
-   resync to about two time steps. Day password tokens are not resynchronized
-   automatically.
+   Email tokens. Day password tokens are not resynchronized automatically.
+
+For example, with a TOTP time step of 30 seconds and an auto resync timeout of
+300 seconds, a first counter ``N`` permits a second counter from ``N+1`` through
+``N+10``. The second request must also arrive strictly before the server-side
+deadline. A timeout that is not a multiple of the time step permits only whole
+steps; a timeout shorter than one step cannot complete TOTP autoresync.
+Repeated codes and candidates outside these limits do not authenticate. The
+pending pair is cleared after evaluating a second candidate in the sync window.
+
+.. note::
+   This replaces the previous TOTP requirement for the exact next counter
+   without a timeout. A pending TOTP pair without a deadline from an older
+   version is rejected and cleared; the user must start a new pair.
 
 
 .. index:: usercache

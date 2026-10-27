@@ -390,10 +390,11 @@ class TotpTokenClass(HotpTokenClass):
     @log_with(log)
     def _autosync(self, hmac2Otp, anOtpVal):
         """
-        synchronize the token based on two otp values automatically.
+        Synchronize the token based on two increasing OTP counters within
+        AutoResyncTimeout, measured in both seconds and token time steps.
         If the OTP is invalid, that OTP counter is stored.
         If an old OTP counter is stored, it is checked, if the new
-        OTP value is the next value after this counter.
+        OTP value advances it by no more than the timeout.
 
         internal method to realize the _autosync within the
         checkOtp method
@@ -419,16 +420,19 @@ class TotpTokenClass(HotpTokenClass):
         log.debug(f"checked otpval in syncwindow ({syncWindow!r}): {res!r}")
 
         if res != -1:
+            timeout = self.get_sync_timeout()
             # if former is defined
             if "otp1c" in info:
-                # check if this is consecutive
                 otp1c = int(info.get("otp1c"))
                 otp2c = res
                 log.debug(f"otp1c: {otp1c!r}, otp2c: {otp2c!r}")
-                if (otp1c + 1) != otp2c:
+                if not 0 < (otp2c - otp1c) * self.timestep <= timeout:
                     log.debug(f"Autoresync failed for token {self.token.serial!s}. OTP values too far apart.")
                     res = -1
-                elif otp2c <= self.token.count:
+                elif int(info.get("dueDate", 0)) <= int(time.time()):
+                    log.debug(f"Autoresync failed for token {self.token.serial!s}. Timeout expired.")
+                    res = -1
+                elif otp1c <= self.token.count or otp2c <= self.token.count:
                     # The resync was done with previous (old) OTP values
                     log.debug(f"Autoresync failed for token {self.token.serial!s}. Previous OTP values used.")
                     res = -1
@@ -443,11 +447,15 @@ class TotpTokenClass(HotpTokenClass):
 
                 # now clean the resync data
                 del info["otp1c"]
+                info.pop("dueDate", None)
                 self.set_tokeninfo(info)
 
             else:
+                if res <= self.token.count:
+                    return -1
                 log.debug(f"setting otp1c: {res!s}")
                 info["otp1c"] = res
+                info["dueDate"] = int(time.time()) + timeout
                 self.set_tokeninfo(info)
                 res = -1
 
