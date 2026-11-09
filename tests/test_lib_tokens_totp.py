@@ -585,7 +585,7 @@ class TOTPTokenTestCase(MyTestCase):
         token = TotpTokenClass(db_token)
         set_privacyidea_config("AutoResync", True)
         token.update({"otpkey": self.otpkey,
-                      "otplen": 6})
+                      "otplen": 6, "timeWindow": 30})
         token.token.count = 47251640
         token.set_sync_window(10)
         # counter = 47251649 => otp = 705493, is out of sync
@@ -618,7 +618,7 @@ class TOTPTokenTestCase(MyTestCase):
         self.assertTrue(r == -1, r)
         self.assertEqual(AutoResyncResult.FAILED, token.auth_details.get(AUTORESYNC_KEY))
 
-        # Autosync with a gap in the next otp value will fail
+        # A one-step time window still requires consecutive OTP values
         token.token.count = 47251640
         # Just try some bullshit config value
         set_privacyidea_config("AutoResyncTimeout", "totally not a number")

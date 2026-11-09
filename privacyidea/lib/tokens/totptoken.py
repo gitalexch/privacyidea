@@ -364,7 +364,7 @@ class TotpTokenClass(HotpTokenClass):
 
         resynced = False
         if -1 == res:
-            # _autosync: test if two consecutive otps have been provided
+            # _autosync: test if two increasing OTP counters are within the configured bounds
             res = self._autosync(hmac2Otp, anOtpVal)
             resynced = res != -1
 
@@ -415,7 +415,8 @@ class TotpTokenClass(HotpTokenClass):
         If the OTP is invalid, that OTP counter is stored until the autoresync timeout is over, see
         get_autoresync_timeout.
         If an OTP counter is stored and the timeout is not over, it is checked, if the new
-        OTP value is the next value after this counter. After the timeout the new OTP value starts a new autoresync.
+        OTP value advances this counter within the token's time window and the autoresync timeout.
+        After the timeout the new OTP value starts a new autoresync.
 
         internal method to realize the _autosync within the
         checkOtp method
@@ -442,14 +443,15 @@ class TotpTokenClass(HotpTokenClass):
 
         if res != -1:
             if self.has_pending_autoresync():
-                # check if this is consecutive
                 otp1c = int(info.get("otp1c"))
                 otp2c = res
                 log.debug(f"otp1c: {otp1c!r}, otp2c: {otp2c!r}")
-                if (otp1c + 1) != otp2c:
+                max_gap = min(max(1, self.timewindow // self.timestep),
+                              self.get_autoresync_timeout() // self.timestep)
+                if not 0 < otp2c - otp1c <= max_gap:
                     log.debug(f"Autoresync failed for token {self.token.serial!s}. OTP values too far apart.")
                     res = -1
-                elif otp2c <= self.token.count:
+                elif otp1c <= self.token.count or otp2c <= self.token.count:
                     # The resync was done with previous (old) OTP values
                     log.debug(f"Autoresync failed for token {self.token.serial!s}. Previous OTP values used.")
                     res = -1

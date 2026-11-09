@@ -98,21 +98,35 @@ provides a wrong OTP value. AutoResync works like this:
   remembers the counter of the OTP value for this token in the token info
   field ``otp1c``.
 
-* Now the user needs to authenticate a second time within the time-interval
-  given in **Auto resync timeout** with the next successive OTP value.
+* Now the user needs to authenticate a second time before the deadline given
+  by **Auto resync timeout**. HOTP requires the next successive OTP value.
 
-* The system checks if the counter of the second OTP value is the successive
-  value to ``otp1c``.
+* For TOTP, the second counter must be greater than the remembered counter.
+  The maximum gap in time steps is
+  ``min(max(1, timeWindow // timeStep), effective_timeout // timeStep)``.
+  ``timeWindow`` is one side of the token's normal symmetric validity window,
+  in seconds. The token's value takes precedence over the global TOTP setting.
+  Both OTP values must still be found in the token's sync window and be newer
+  than its last accepted counter.
 
-* If it is, the token counter is set and the user is successfully authenticated.
+* If these checks pass, the token counter is set and the user is successfully
+  authenticated. An expired or missing deadline makes the next matching value
+  start a new autoresync instead.
+
+For example, a TOTP token with ``timeWindow=300``, ``timeStep=30`` and an
+**Auto resync timeout** of 300 seconds permits second counters ``N+1`` through
+``N+10``. Raising the timeout to 3600 seconds still permits only ten second
+counters. A time window smaller than two time steps retains the requirement
+for consecutive values. Non-multiple intervals are rounded down to whole
+steps. A smaller normal validity window therefore also restricts autoresync;
+no separate setting is needed.
 
 .. note:: AutoResync works for all HOTP and TOTP based tokens including SMS and
-   Email tokens. For TOTP tokens, the second OTP value must belong to the time
-   step directly after the remembered one. privacyIDEA uses at least three time
-   steps as **Auto resync timeout** for TOTP tokens. The token shows each value
-   for one time step, so the user needs up to two time steps to read both
-   values. The third time step leaves time for the requests. Day password
-   tokens are not resynchronized automatically.
+   Email tokens. privacyIDEA uses at least three time steps as the effective
+   **Auto resync timeout** for TOTP tokens. The token shows each value for one
+   time step, so the user needs up to two time steps to read both values. The
+   third time step leaves time for the requests. Day password tokens are not
+   resynchronized automatically.
 
 
 .. index:: usercache
