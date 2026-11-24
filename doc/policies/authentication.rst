@@ -850,6 +850,20 @@ The text can contain the following tags, that will be filled:
   * {action} the endpoint that triggered the challenge, like */validate/check*.
   * {url} the base URL of the privacyIDEA server. This requires ``PI_BASE_URL`` to be
     configured in :ref:`cfgfile`.
+  * {request_headers[X-Application]} the value of a header from the request that
+    triggered the challenge. Replace ``X-Application`` with any HTTP header name;
+    names are case-insensitive. Missing headers expand to an empty string, and
+    each value is limited to 256 characters before substitution.
+
+For example, a Keycloak plugin or reverse proxy can send ``X-Application: Payroll``.
+The template ``Confirm the login to {request_headers[X-Application]}`` then renders
+as ``Confirm the login to Payroll``. The rendered text is signed and delivered in
+the PUSH payload's ``question`` field, including when an HTTP SMS gateway is used.
+It is also stored with the challenge so polling returns the same text. If an older
+challenge has no stored text, headers of the polling smartphone are not substituted.
+
+Header values are untrusted display metadata. Only reference values intended for
+the notification; do not include credentials from ``Authorization`` or ``Cookie``.
 
 .. note:: A tag that does not exist at all - like the {otp} of :ref:`emailtext`, which a
    push notification never contains - can not be filled. The complete text is discarded in

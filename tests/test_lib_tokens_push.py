@@ -357,11 +357,18 @@ class PushTokenTestCase(MyTestCase):
                           f"{PushAction.REGISTRATION_URL}={REGISTRATION_URL}")
         token = self._create_push_token()
         token.write_tokeninfo(PushAction.FIREBASE_CONFIG, gateway_identifier)
+        set_policy("push-http-header-text", scope=SCOPE.AUTH,
+                   action=f"{PushAction.MOBILE_TEXT}=Login to " + "{request_headers[X-Application]}")
+        self.addCleanup(delete_policy, "push-http-header-text")
         responses.add(responses.POST, "https://push.example.com/send", status=200)
         g = FakeFlaskG()
         g.policy_object = PolicyClass()
         g.audit_object = mock.MagicMock(audit_data={})
         g.serial = token.get_serial()
+        request = Request(EnvironBuilder(headers={"X-Application": "Payroll"}).get_environ())
+        request.User = None
+        request.environ["werkzeug.request"] = request
+        g.request_headers = request.headers
 
         success, _, transaction_id, _ = token.create_challenge(options={"g": g})
 
@@ -371,6 +378,9 @@ class PushTokenTestCase(MyTestCase):
         self.assertEqual("firebaseT", request_body["device_token"])
         push_payload = request_body["push_payload"]
         self.assertEqual(token.get_serial(), push_payload["serial"])
+        self.assertEqual("Login to Payroll", push_payload["question"])
+        self.assertEqual("Login to Payroll",
+                         get_challenges(serial=token.get_serial())[0].get_data()["notification"]["question"])
         _verify_push_payload_signatures(push_payload)
         remove_token(token.get_serial())
         delete_policy("push-http")

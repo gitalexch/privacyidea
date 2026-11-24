@@ -376,6 +376,13 @@ def _fit_notification_to_storage_budget(data: dict) -> dict:
     return data
 
 
+class _PushRequestHeaders(dict):
+    """Case-insensitive header tags; missing headers expand to an empty string."""
+
+    def __getitem__(self, name):
+        return self.get(str(name).lower(), "")
+
+
 def _build_mobile_notification(token: TokenClass, options: dict) -> dict:
     """
     Build the notification the user sees on the smartphone: the question from the
@@ -424,6 +431,10 @@ def _build_mobile_notification(token: TokenClass, options: dict) -> dict:
                            challenge=options.get("challenge"))
     for tag in ("ua_string", "ua_browser", "action"):
         tags[tag] = _truncate_with_log(tags[tag], MAX_CLIENT_TAG_LENGTH, f"tag {tag!r}")
+    tags["request_headers"] = _PushRequestHeaders(
+        (name.lower(), _truncate_with_log(value, MAX_CLIENT_TAG_LENGTH, f"request header {name!r}"))
+        for name, value in request.headers.items()
+    ) if request else _PushRequestHeaders()
     try:
         message_on_mobile = message_on_mobile.format(**tags)
     except Exception as e:
