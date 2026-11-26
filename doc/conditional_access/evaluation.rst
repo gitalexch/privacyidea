@@ -59,7 +59,9 @@ authentication policy ``hide_specific_error_message`` to make a refusal
 identical to any other failed authentication at these two endpoints
 (``no_detail_on_fail`` does so at ``/validate/check`` only), see
 :ref:`conditional_access_error_messages_masking`. ``/validate/radiuscheck``
-answers every failure, a refusal included, with an empty ``400``.
+answers every failure, a refusal included, with an empty ``400`` by default.
+The optional :ref:`rlm_rest_push` format instead returns HTTP ``401`` and an
+``Access-Reject`` attribute, without refusal wording.
 
 Only a request refused by one of the questions above carries a message at
 all. Because the request that writes a restriction is answered normally, a

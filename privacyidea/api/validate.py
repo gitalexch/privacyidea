@@ -51,7 +51,8 @@ The endpoints fall in five groups:
 * :http:post:`/validate/check` — verify a user/serial + password and,
   for challenge-response tokens, trigger or complete the challenge.
   The ``/validate/radiuscheck`` URL alias shapes the response into
-  RADIUS-friendly status codes (204 / 400) for protocol adapters.
+  RADIUS-friendly status codes (204 / 400), or opt-in FreeRADIUS attribute JSON
+  for PUSH challenge-response (``response_format=freeradius``).
 * :http:post:`/validate/triggerchallenge` — admin-only, requires the
   ``triggerchallenge`` policy. Forces a challenge for every matching
   challenge-response token of a user.
@@ -96,6 +97,8 @@ from flask_babel import _
 
 from privacyidea.api.auth import admin_required
 from privacyidea.api.lib.decorators import add_serial_from_response_to_g
+from privacyidea.api.lib.radius import (is_rest_radius_request, prepare_rest_radius_request,
+                                       validate_rest_radius_continuation)
 from privacyidea.api.lib.postpolicy import (postpolicy,
                                             check_tokentype, check_serial,
                                             check_tokeninfo, serial_allowed, tokeninfo_mismatch,
@@ -196,7 +199,8 @@ def before_request():
 
     # Join the attempt here because the attempt id lives in the challenge, which the token logic deletes once
     # answered, leaving nothing to read it from later. ``state`` is the RADIUS alias of ``transaction_id``.
-    continue_attempt(get_optional_one_of(request.all_data, ["transaction_id", "state"]))
+    if not is_rest_radius_request(request):
+        continue_attempt(get_optional_one_of(request.all_data, ["transaction_id", "state"]))
 
     privacyidea_server = get_app_config_value("PI_AUDIT_SERVERNAME", get_privacyidea_node(request.host))
     get_before_request_config()
@@ -246,6 +250,9 @@ def before_request():
         "user": request.User.login,
         "resolver": request.User.resolver,
         "realm": request.User.realm})
+
+    if is_rest_radius_request(request):
+        continue_attempt(prepare_rest_radius_request(request))
 
 
 def _offline_refill_identity() -> User:
@@ -449,14 +456,16 @@ def check():
 
     * ``/validate/check`` — standard JSON response, ``result.value``
       is ``true`` / ``false``.
-    * ``/validate/radiuscheck`` — RADIUS adapter shape: the body is
-      always empty. A successful authentication returns ``204``; any
+    * ``/validate/radiuscheck`` — by default the body is
+      empty. A successful authentication returns ``204``; any
       other outcome returns ``400``. Unlike ``/validate/check``, this
       includes server-side faults (e.g. an unknown serial or an
       internal error): they are collapsed into the same empty ``400``
       rather than surfacing the JSON error body and its status code,
       because a RADIUS adapter only consumes the status code. Inspect
       the audit log or use ``/validate/check`` to diagnose failures.
+      With ``response_format=freeradius`` the response instead contains
+      rlm_rest attribute JSON for PUSH challenge-response; see :ref:`rlm_rest_push`.
 
     To return user attributes alongside the authentication result
     (the former ``/validate/samlcheck`` use case), enable the AUTHZ
@@ -493,7 +502,12 @@ def check():
         and a wrong value counts as a failed authentication.
     :jsonparam transaction_id: transaction id for the second leg of
         a challenge-response flow.
-    :jsonparam state: alias of ``transaction_id`` for legacy callers.
+    :jsonparam state: alias of ``transaction_id`` for legacy callers. In the
+        FreeRADIUS response format this must be the signed State from the challenge.
+    :jsonparam response_format: on ``/validate/radiuscheck``, ``freeradius`` selects
+        rlm_rest attribute JSON with PUSH challenge-response. See :ref:`rlm_rest_push`.
+    :jsonparam radius_nas: NAS binding supplied by the trusted RADIUS adapter;
+        required with ``response_format=freeradius``.
     :jsonparam exception: ``1`` to surface delivery failures (SMS,
         email, push) as HTTP 500 instead of returning a generic
         challenge-creation error.
@@ -627,6 +641,12 @@ def check():
     context["options"].update({"g": g, "clientip": g.client_ip})
     context["options"]["user"] = context["user"]
 
+    radius_completion = None
+    if is_rest_radius_request(request):
+        radius_completion = validate_rest_radius_continuation(request)
+        if radius_completion is not None:
+            context["options"]["radius_rest"] = radius_completion
+
     # Dispatch to Logic Handlers
     credential_id = get_optional_one_of(request.all_data, ["credential_id", "credentialid"])
     serial = get_optional(request.all_data, "serial")
@@ -638,6 +658,14 @@ def check():
             _handle_serial_auth(context, serial)
         else:
             _handle_standard_auth(context)
+        if radius_completion is not None and context["result"] and not radius_completion["verified"]:
+            # A policy shortcut must not redeem a signed State without consuming the PUSH approval.
+            context["result"] = False
+            context["token_verified"] = False
+            context["details"] = {"message": "The PUSH challenge was not verified"}
+            context[AUTH_EVENT_TYPE_KEY] = AuthEventType.NOT_AUTHORIZED
+        if is_rest_radius_request(request):
+            g.radius_rest_view_success = context["result"] is True
         response = _finalize_auth_response(context)
     except TokenAdminError as error:
         # A locked token raises before the lib can classify it, so classify it here instead.

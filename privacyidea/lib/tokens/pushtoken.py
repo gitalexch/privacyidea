@@ -1871,6 +1871,8 @@ class PushTokenClass(TokenClass):
             # Another request already redeemed this approval, so only that one is accepted.
             log.info(f"The challenge {transaction_id} of token {self.token.serial} was used by another request.")
             return -1
+        if state.otp_counter >= 0 and options.get("radius_rest") is not None:
+            options["radius_rest"]["verified"] = True
         return state.otp_counter
 
     @classmethod

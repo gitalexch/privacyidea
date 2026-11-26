@@ -798,6 +798,13 @@ def check_token_list(token_object_list: list[TokenClass], passw: str, user: User
 
     elif challenge_response_token_list:
         # The RESPONSE for a previous request of a challenge response token was found.
+        if options.get("radius_rest") is not None:
+            from privacyidea.lib.radiuschallenge import pending_push_response
+            pending = pending_push_response(challenge_response_token_list,
+                                            options.get("transaction_id") or options.get("state"))
+            if pending is not None:
+                pending[AUTH_EVENT_TYPE_KEY] = None
+                return False, pending
         matching_challenge = False
         further_challenge = False
         for token_object in challenge_response_token_list:

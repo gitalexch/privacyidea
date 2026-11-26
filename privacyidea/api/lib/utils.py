@@ -99,6 +99,7 @@ INTERNAL_OPTION_KEYS = frozenset({
     # so it cannot be used to bypass authentication.
     "push_triggered",  # set by create_challenges_from_tokens
     "valid_token_num",  # server-set count of already-valid tokens (check_token_list -> pushtoken)
+    "radius_rest",  # trusted completion marker for the REST challenge adapter
 })
 
 # The following user-agents (with versions) do not need extra unquoting
@@ -1076,12 +1077,13 @@ def hide_specific_error_message(request, response):
 
 def construct_radius_response(request, response):
     """
-    Shape a ``/validate/radiuscheck`` response into the RADIUS adapter format:
+    Shape a ``/validate/radiuscheck`` response into the RADIUS adapter format. By default:
     an empty body with HTTP ``204`` for a successful authentication and an empty
     HTTP ``400`` for every other outcome (a failed authentication or any error,
     including a server fault).
 
-    A RADIUS adapter only consumes the status code, so the JSON body is dropped
+    With ``response_format=freeradius``, emit rlm_rest attribute JSON for PUSH
+    challenge-response instead. Otherwise the JSON body is dropped
     entirely. This is the single implementation, applied centrally from the
     shared after-request handler; it is a no-op for any other route.
 
@@ -1092,6 +1094,9 @@ def construct_radius_response(request, response):
     url_rule = getattr(request, "url_rule", None)
     if url_rule is None or url_rule.rule != "/validate/radiuscheck":
         return response
+    from privacyidea.api.lib.radius import is_rest_radius_request, construct_rest_radius_response
+    if is_rest_radius_request(request):
+        return construct_rest_radius_response(request, response)
     return_code = 400  # generic 400 error by default
     if response.is_json:
         content = response.json

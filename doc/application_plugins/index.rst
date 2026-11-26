@@ -180,8 +180,8 @@ There are two ways to integrate FreeRADIUS:
 * Using a Perl-based privacyIDEA plugin, which is available for FreeRADIUS 3.x.
   It supports advanced use cases (such as challenge-response authentication or attribute mapping).
   Read more about it at :ref:`rlm_perl`.
-* Using the rlm_rest module provided by FreeRADIUS. However, this setup does not support
-  challenge-response or attribute mapping. Read more about it at :ref:`rlm_rest`.
+* Using the rlm_rest module provided by FreeRADIUS. An optional response format supports
+  PUSH challenge-response without ``push_wait``. Read more about it at :ref:`rlm_rest`.
 
 With either setup, you can test the RADIUS setup using a command like this::
 

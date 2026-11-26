@@ -29,8 +29,10 @@ its own **error message** to say. Where none was written, ``/auth``,
 ``/validate/check``, ``/validate/triggerchallenge`` and ``/validate/initialize``
 answer with the generic ``Authentication failed.``, while
 ``/validate/remember_device`` and ``/ttype/push`` carry no message.
-``/validate/radiuscheck`` answers every rejection with an empty ``400``, so no
-wording reaches a RADIUS client. A stage's own error message always takes
+``/validate/radiuscheck`` answers every rejection with an empty ``400`` by default;
+the optional :ref:`rlm_rest_push` format returns HTTP ``401`` with an
+``Access-Reject`` attribute. Neither format forwards refusal wording.
+A stage's own error message always takes
 precedence over this policy.
 
 Because the wording is per action, a request on which more than one restriction is

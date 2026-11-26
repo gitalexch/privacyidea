@@ -232,7 +232,9 @@ These endpoints do not send the JSON object described above:
 * :http:get:`/audit/(csvfile)` and :http:get:`/token/` with ``outform=csv`` send CSV data.
 * :http:get:`/policy/export/(export)` sends the policies as a file.
 * :http:get:`/system/documentation` sends the configuration as a reStructuredText file.
-* :http:post:`/validate/radiuscheck` sends an empty body with the HTTP status code ``204`` or ``400``.
+* :http:post:`/validate/radiuscheck` sends an empty body with the HTTP status code ``204`` or ``400`` by default.
+  With ``response_format=freeradius``, it sends rlm_rest attribute JSON for PUSH challenge-response;
+  see :ref:`rlm_rest_push`.
 * At ``/ttype/<type>``, some token types answer in their own format. Examples are the TiQR token and the Yubico
   validation protocol of the Yubikey token.
 

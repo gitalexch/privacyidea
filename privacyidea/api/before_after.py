@@ -103,9 +103,8 @@ log = logging.getLogger(__name__)
 # "no-store" rather than "no-cache", and a new endpoint that can return one belongs here.
 #
 # These are endpoint names, not paths, so one entry covers every route that reaches the view:
-# "validate_blueprint.check" is both /validate/check and /validate/radiuscheck. radiuscheck
-# answers with an empty body, so covering it too costs nothing - an authentication response is
-# not something a client should be writing to disk either.
+# "validate_blueprint.check" is both /validate/check and /validate/radiuscheck. Neither the legacy
+# empty response nor the opt-in rlm_rest JSON should be written to disk by a client.
 NO_STORE_ENDPOINTS = frozenset({
     "token_blueprint.init",
     # enroll_via_validate returns the enrollment details of the new token inside the challenge
@@ -785,8 +784,8 @@ def mask_authentication_error_response(request, response):
 
 def shape_radius_response(request, response):
     """
-    Apply :func:`construct_radius_response` to ``/validate/radiuscheck``, shaping it into the RADIUS empty-body
-    ``204``/``400`` form.
+    Apply :func:`construct_radius_response` to ``/validate/radiuscheck``: the legacy empty-body
+    ``204``/``400`` form, or opt-in rlm_rest attribute JSON.
 
     Applied from ``after_request`` for the same reason as :func:`mask_authentication_error_response`: so an error
     response built by an error handler is shaped too.
