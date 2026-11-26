@@ -115,6 +115,46 @@ But it can also look like this::
    So in a production environment where the privacyIDEA system is located on
    another server than the RADIUS server, you should set "SSL_CHECK = true".
 
+Forwarding request attributes to PUSH notifications
+--------------------------------------------------
+
+A Perl plugin with ``[RequestHeaders]`` support can forward selected attributes
+of the current RADIUS request as HTTP headers. This requires the updated plugin;
+older versions do not implement this configuration section. For example, add
+the following to ``rlm_perl.ini``::
+
+   [RequestHeaders]
+   X-Application = NAS-Identifier
+   X-RADIUS-Called-Station-Id = Called-Station-Id
+
+The left side is the outgoing HTTP header name, and the right side is the RADIUS
+request attribute name. This is separate from ``[Mapping]``, which maps the
+privacyIDEA response to RADIUS reply attributes. The section applies to all
+requests in a plugin instance; separate instances can use different
+configuration files through ``configfile`` as shown above.
+
+With support for ``{request_headers[...]}`` in :ref:`policy_push_text_on_mobile`,
+the policy value ``Confirm login to {request_headers[X-Application]}`` renders
+as ``Confirm login to Corporate-VPN`` when the NAS sends
+``NAS-Identifier = Corporate-VPN``. The rendered question is signed, sent through
+the configured PUSH gateway and stored with the challenge. The NAS does not need
+to repeat the attribute on the continuation request, and smartphone polling
+does not supply the original attributes.
+
+The plugin omits missing attributes. It also omits undefined, multivalued,
+control-character and non-ASCII values; it supports printable US-ASCII scalar
+values only. Header names must be valid HTTP field names. Headers controlling
+HTTP routing, framing, authentication and the plugin's User-Agent are reserved;
+see the plugin README for the complete list. Only map metadata intended for the
+notification, and derive a trusted display name in FreeRADIUS when appropriate.
+
+Header forwarding works with either the :ref:`policy_push_wait` flow or the
+existing ``Access-Challenge`` / ``State`` continuation. For example, with
+``push_wait = 30``, configure a longer plugin ``TIMEOUT`` such as 35 seconds and
+suitable NAS and HTTP proxy timeouts. Without ``push_wait``, the NAS must
+continue the challenge exchange after the smartphone confirms; the Perl plugin
+does not poll for the result itself.
+
 .. _radius_and_realms:
 
 Radius and Realms
